@@ -1,78 +1,61 @@
-import crypto from "crypto";
-
 /**
- * Minimal PA-API 5 (SearchItems) client.
+ * Amazon Creators API client.
  *
- * Requires a qualifying Associates account (recent sales) to get PA-API
- * credentials from https://webservices.amazon.com/paapi5/documentation/
+ * Amazon retired the old Product Advertising API (PA-API 5, AWS-signature
+ * auth) on May 15, 2026. This replaces it with the Creators API, which uses
+ * OAuth2 client-credentials auth instead of AWS Sig V4.
  *
- * PA-API doesn't expose a literal "lightning deals" feed, but SearchItems
- * supports MinSavingPercent, which is the legitimate way to pull items
- * that are currently discounted by at least X% — effectively a clearance
- * filter straight from Amazon's own data.
+ * Your credentials show as Version 3.1 in Associates Central, which means
+ * the Login-with-Amazon (LWA) auth path, not the older Cognito path (2.x).
+ * If Associates Central ever shows you a 2.x credential instead, the token
+ * endpoint and request shape both change — see Amazon's Creators API docs.
  */
 
-const HOST = "webservices.amazon.com";
-const REGION = "us-east-1";
-const SERVICE = "ProductAdvertisingAPI";
-const PATH = "/paapi5/searchitems";
-const TARGET = "com.amazon.paapi5.v1.ProductAdvertisingAPIv1.SearchItems";
+const TOKEN_ENDPOINT = "https://api.amazon.com/auth/o2/token"; // v3.1 = NA region
+const CATALOG_HOST = "https://creatorsapi.amazon"; // yes, the .amazon TLD is real
+const SEARCH_PATH = "/catalog/v1/searchItems";
 
-function hmac(key: Buffer | string, data: string) {
-  return crypto.createHmac("sha256", key).update(data, "utf8").digest();
-}
+type TokenResponse = {
+  access_token: string;
+  token_type: string;
+  expires_in: number;
+};
 
-function sha256Hex(data: string) {
-  return crypto.createHash("sha256").update(data, "utf8").digest("hex");
-}
+// Cached in module scope — helps when multiple searches happen within the
+// same warm serverless invocation. Each cold start just fetches a new one.
+let cachedToken: { value: string; expiresAt: number } | null = null;
 
-function getAmzDate() {
-  return new Date().toISOString().replace(/[:-]|\.\d{3}/g, "");
-}
+async function getAccessToken(): Promise<string> {
+  if (cachedToken && Date.now() < cachedToken.expiresAt) {
+    return cachedToken.value;
+  }
 
-function signRequest(payload: string) {
-  const accessKey = process.env.AMAZON_PAAPI_ACCESS_KEY!;
-  const secretKey = process.env.AMAZON_PAAPI_SECRET_KEY!;
+  const clientId = process.env.AMAZON_CREATORS_CLIENT_ID!;
+  const clientSecret = process.env.AMAZON_CREATORS_CLIENT_SECRET!;
 
-  const amzDate = getAmzDate();
-  const dateStamp = amzDate.slice(0, 8);
+  const response = await fetch(TOKEN_ENDPOINT, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      grant_type: "client_credentials",
+      client_id: clientId,
+      client_secret: clientSecret,
+      scope: "creatorsapi::default",
+    }),
+  });
 
-  const canonicalHeaders =
-    `content-encoding:amz-1.0\n` +
-    `content-type:application/json; charset=utf-8\n` +
-    `host:${HOST}\n` +
-    `x-amz-date:${amzDate}\n` +
-    `x-amz-target:${TARGET}\n`;
-  const signedHeaders = "content-encoding;content-type;host;x-amz-date;x-amz-target";
+  if (!response.ok) {
+    const errBody = await response.text();
+    throw new Error(`Creators API token request failed (${response.status}): ${errBody}`);
+  }
 
-  const canonicalRequest = [
-    "POST",
-    PATH,
-    "",
-    canonicalHeaders,
-    signedHeaders,
-    sha256Hex(payload),
-  ].join("\n");
-
-  const credentialScope = `${dateStamp}/${REGION}/${SERVICE}/aws4_request`;
-  const stringToSign = [
-    "AWS4-HMAC-SHA256",
-    amzDate,
-    credentialScope,
-    sha256Hex(canonicalRequest),
-  ].join("\n");
-
-  const kDate = hmac(`AWS4${secretKey}`, dateStamp);
-  const kRegion = hmac(kDate, REGION);
-  const kService = hmac(kRegion, SERVICE);
-  const kSigning = hmac(kService, "aws4_request");
-  const signature = hmac(kSigning, stringToSign).toString("hex");
-
-  const authorizationHeader =
-    `AWS4-HMAC-SHA256 Credential=${accessKey}/${credentialScope}, ` +
-    `SignedHeaders=${signedHeaders}, Signature=${signature}`;
-
-  return { amzDate, authorizationHeader };
+  const data: TokenResponse = await response.json();
+  cachedToken = {
+    value: data.access_token,
+    // 60-second safety buffer so we never use a token that's about to expire mid-request.
+    expiresAt: Date.now() + (data.expires_in - 60) * 1000,
+  };
+  return cachedToken.value;
 }
 
 export type AmazonDealItem = {
@@ -90,67 +73,62 @@ export async function searchAmazonDeals(
   minSavingPercent = 20
 ): Promise<AmazonDealItem[]> {
   const partnerTag = process.env.AMAZON_ASSOCIATES_TAG!;
+  const token = await getAccessToken();
 
-  const payload = JSON.stringify({
-    Keywords: keywords,
-    MinSavingPercent: minSavingPercent,
-    SearchIndex: "All",
-    ItemCount: 10,
-    PartnerTag: partnerTag,
-    PartnerType: "Associates",
-    Marketplace: "www.amazon.com",
-    Resources: [
-      "Images.Primary.Large",
-      "ItemInfo.Title",
-      "Offers.Listings.Price",
-      "Offers.Listings.SavingBasis",
-    ],
-  });
-
-  const { amzDate, authorizationHeader } = signRequest(payload);
-
-  const response = await fetch(`https://${HOST}${PATH}`, {
+  const response = await fetch(`${CATALOG_HOST}${SEARCH_PATH}`, {
     method: "POST",
     headers: {
-      "content-encoding": "amz-1.0",
-      "content-type": "application/json; charset=utf-8",
-      host: HOST,
-      "x-amz-date": amzDate,
-      "x-amz-target": TARGET,
-      Authorization: authorizationHeader,
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      "x-marketplace": "www.amazon.com",
     },
-    body: payload,
+    body: JSON.stringify({
+      keywords,
+      searchIndex: "All",
+      itemCount: 10,
+      partnerTag,
+      partnerType: "Associates",
+      marketplace: "www.amazon.com",
+      resources: [
+        "images.primary.large",
+        "itemInfo.title",
+        "offersV2.listings.price",
+        "offersV2.listings.savingBasis",
+      ],
+    }),
   });
 
   if (!response.ok) {
     const errBody = await response.text();
-    throw new Error(`PA-API request failed (${response.status}): ${errBody}`);
+    throw new Error(`Creators API search failed (${response.status}): ${errBody}`);
   }
 
   const data = await response.json();
-  const items = data?.SearchResult?.Items ?? [];
+  const items = data?.searchResult?.items ?? [];
 
   return items
     .map((item: any): AmazonDealItem | null => {
-      const listing = item?.Offers?.Listings?.[0];
-      const price = listing?.Price?.Amount;
-      const savingBasis = listing?.SavingBasis?.Amount;
+      const listing = item?.offersV2?.listings?.[0];
+      const price = listing?.price?.amount;
+      const savingBasis = listing?.savingBasis?.amount;
       if (!price) return null;
 
       const discountPct = savingBasis
         ? Math.round(((savingBasis - price) / savingBasis) * 100)
         : null;
 
+      // Filtered here rather than trusting a request-side savings filter,
+      // since Amazon's docs for this field on Creators API aren't settled yet.
+      if (discountPct !== null && discountPct < minSavingPercent) return null;
+
       return {
-        asin: item.ASIN,
-        title: item?.ItemInfo?.Title?.DisplayValue ?? "Untitled item",
-        imageUrl: item?.Images?.Primary?.Large?.URL ?? "",
+        asin: item.asin,
+        title: item?.itemInfo?.title?.displayValue ?? "Untitled item",
+        imageUrl: item?.images?.primary?.large?.url ?? "",
         price,
         originalPrice: savingBasis ?? null,
         discountPct,
-        // Build the affiliate link directly rather than relying on Amazon's
-        // returned DetailPageURL, so we know the tag is always correct.
-        affiliateUrl: `https://www.amazon.com/dp/${item.ASIN}?tag=${partnerTag}`,
+        affiliateUrl: `https://www.amazon.com/dp/${item.asin}?tag=${partnerTag}`,
       };
     })
     .filter((item: AmazonDealItem | null): item is AmazonDealItem => item !== null);
