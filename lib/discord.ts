@@ -1,19 +1,7 @@
 import type { Deal } from "./supabase";
 
-// Comma-separated list of webhook URLs in env, e.g.
-// DISCORD_WEBHOOK_URLS="https://discord.com/api/webhooks/aaa,https://discord.com/api/webhooks/bbb"
-function getWebhookUrls(): string[] {
-  const raw = process.env.DISCORD_WEBHOOK_URLS;
-  if (!raw) return [];
-  return raw
-    .split(",")
-    .map((url) => url.trim())
-    .filter(Boolean);
-}
-
-export async function postDealToDiscord(deal: Deal): Promise<void> {
-  const urls = getWebhookUrls();
-  if (urls.length === 0) return;
+export async function postDealToDiscord(deal: Deal, webhookUrls: string[]): Promise<void> {
+  if (webhookUrls.length === 0) return;
 
   const discountLine = deal.discount_pct
     ? `**${deal.discount_pct}% off**${
@@ -37,7 +25,7 @@ export async function postDealToDiscord(deal: Deal): Promise<void> {
   });
 
   await Promise.all(
-    urls.map((url) =>
+    webhookUrls.map((url) =>
       fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

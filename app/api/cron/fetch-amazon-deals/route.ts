@@ -2,11 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { searchAmazonDeals } from "@/lib/amazon-paapi";
 import { postDealToDiscord } from "@/lib/discord";
-
-// Keywords to scan each run — edit this list (or move it to the settings
-// page / a DB table later) to control what categories get pulled in.
-const SEARCH_KEYWORDS = ["clearance", "deal of the day"];
-const MIN_SAVING_PERCENT = 25;
+import { getSettings } from "@/lib/settings";
 
 export async function GET(req: NextRequest) {
   // Vercel Cron sends a secret in the Authorization header — set
@@ -16,11 +12,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const settings = await getSettings();
   const newDeals = [];
 
-  for (const keywords of SEARCH_KEYWORDS) {
+  for (const keywords of settings.searchKeywords) {
     try {
-      const items = await searchAmazonDeals(keywords, MIN_SAVING_PERCENT);
+      const items = await searchAmazonDeals(keywords, settings.minSavingPercent);
 
       for (const item of items) {
         // Skip if we've already posted this ASIN recently.
@@ -56,7 +53,7 @@ export async function GET(req: NextRequest) {
         }
 
         newDeals.push(inserted);
-        await postDealToDiscord(inserted);
+        await postDealToDiscord(inserted, settings.discordWebhookUrls);
       }
     } catch (err) {
       console.error(`PA-API search failed for "${keywords}":`, err);

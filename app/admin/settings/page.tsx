@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { isAdminRequest } from "@/lib/auth";
 import LogoutButton from "@/components/LogoutButton";
+import SettingsForm from "@/components/SettingsForm";
 
 export default function AdminSettingsPage() {
   // Defense in depth: middleware already redirected anyone without a
@@ -17,32 +18,13 @@ export default function AdminSettingsPage() {
         <LogoutButton />
       </div>
 
-      <section className="mb-6 rounded-tag border border-line bg-inkRaised p-5">
-        <h2 className="font-body text-sm font-semibold text-cream">Deal sourcing</h2>
-        <p className="mt-1 font-body text-xs text-slate">
-          Search keywords and minimum discount % live in the cron route for now
-          (app/api/cron/fetch-amazon-deals/route.ts). Wiring these to editable
-          fields here is the natural next step once the basic pipeline is
-          confirmed working.
-        </p>
-      </section>
+      <SettingsForm />
 
-      <section className="mb-6 rounded-tag border border-line bg-inkRaised p-5">
-        <h2 className="font-body text-sm font-semibold text-cream">Discord webhooks</h2>
-        <p className="mt-1 font-body text-xs text-slate">
-          Managed via the DISCORD_WEBHOOK_URLS environment variable (comma
-          separated). Every new live deal posts to all of them automatically.
-        </p>
-      </section>
-
-      <section className="rounded-tag border border-line bg-inkRaised p-5">
-        <h2 className="font-body text-sm font-semibold text-cream">Pending review queue</h2>
-        <p className="mt-1 font-body text-xs text-slate">
-          Twitter-sourced submissions land here with status &quot;pending_review&quot;
-          before going live. Not wired up to a UI yet — flag if you want this
-          built next.
-        </p>
-      </section>
+      <p className="mt-6 font-body text-xs text-slate">
+        Amazon PA-API keys and the cron secret are set in Vercel&apos;s
+        environment variables, not here — those are credentials, not
+        day-to-day settings.
+      </p>
     </main>
   );
 }
