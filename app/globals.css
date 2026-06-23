@@ -1,0 +1,28 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url("https://fonts.googleapis.com/css2?family=Archivo+Black&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap");
+
+body {
+  background-color: #14171f;
+  color: #f7f3ea;
+  font-family: "Inter", system-ui, sans-serif;
+}
+
+/* Perforated "string hole" notch on the deal tag, top-left corner */
+.tag-notch {
+  position: relative;
+}
+.tag-notch::before {
+  content: "";
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #14171f;
+  box-shadow: inset 0 0 0 2px #2b303b;
+  z-index: 2;
+}
