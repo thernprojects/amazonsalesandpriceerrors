@@ -23,7 +23,7 @@ export default function AdminLoginPage() {
     setSubmitting(false);
 
     if (res.ok) {
-      router.push("/admin/settings");
+      router.push("/admin/new-deal");
     } else {
       const data = await res.json().catch(() => ({}));
       setError(data.error ?? "Something went wrong");
