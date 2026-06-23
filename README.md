@@ -71,4 +71,3 @@ webhook fan-out, cron wiring.
 **Stubbed for next pass:** the Twitter submission form/queue UI, editable
 search keywords (currently hardcoded in the cron route), deal expiry
 sweep (nothing currently flips old deals from `live` to `expired`).
-
