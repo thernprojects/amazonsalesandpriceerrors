@@ -1,38 +1,62 @@
 import type { Deal } from "./supabase";
 
-export async function postDealToDiscord(deal: Deal, webhookUrls: string[]): Promise<void> {
+export type DiscordDealInput = {
+  title: string;
+  price: number;
+  originalPrice?: number | null;
+  affiliateUrl: string;
+  promoCode?: string | null;
+  imageUrl?: string | null;
+};
+
+function buildMessageContent(deal: DiscordDealInput): string {
+  const priceLine = deal.originalPrice
+  ? `${deal.title} ~ Now $${deal.price.toFixed(2)} (Was $${deal.originalPrice.toFixed(2)})`
+    : `${deal.title} ~ Now $${deal.price.toFixed(2)}`;
+
+const lines = [priceLine, "", deal.affiliateUrl];
+
+if (deal.promoCode) {
+  lines.push(`~ Promo: ${deal.promoCode}`);
+}
+
+if (deal.imageUrl) {
+  lines.push("", deal.imageUrl);
+}
+
+return lines.join("\n");
+}
+
+export async function postDealToDiscord(
+  deal: DiscordDealInput,
+  webhookUrls: string[]
+  ): Promise<void> {
   if (webhookUrls.length === 0) return;
 
-  const discountLine = deal.discount_pct
-    ? `**${deal.discount_pct}% off**${
-        deal.original_price ? ` ~~$${deal.original_price.toFixed(2)}~~` : ""
-      } → **$${deal.sale_price.toFixed(2)}**`
-    : `**$${deal.sale_price.toFixed(2)}**`;
+const body = JSON.stringify({ content: buildMessageContent(deal) });
 
-  const embed = {
-    title: deal.title,
-    url: deal.affiliate_url,
-    description: discountLine,
-    color: 0xff5a36,
-    image: { url: deal.image_url },
-    footer: { text: "Silky's Deals and Steals" },
-    timestamp: new Date(deal.posted_at).toISOString(),
-  };
-
-  const body = JSON.stringify({
-    content: `🔥 New deal: ${deal.title}`,
-    embeds: [embed],
-  });
-
-  await Promise.all(
-    webhookUrls.map((url) =>
-      fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body,
-      }).catch((err) => {
-        console.error(`Discord webhook post failed for ${url}:`, err);
-      })
-    )
+await Promise.all(
+  webhookUrls.map((url) =>
+    fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+    }).catch((err) => {
+      console.error(`Discord webhook post failed for ${url}:`, err);
+    })
+                  )
   );
+}
+
+export async function postDbDealToDiscord(deal: Deal, webhookUrls: string[]): Promise<void> {
+  await postDealToDiscord(
+    {
+      title: deal.title,
+      price: deal.sale_price,
+      originalPrice: deal.original_price,
+      affiliateUrl: deal.affiliate_url,
+      imageUrl: deal.image_url,
+    },
+    webhookUrls
+    );
 }
